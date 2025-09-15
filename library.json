@@ -10,12 +10,10 @@
   "runnable": 1,
   "embedTypes": ["div"],
   "preloadedJs": [
-    { "path": "scripts/murder-mystery.js" }
+    { "path": "dist/murder-mystery.bundle.js" }
   ],
   "preloadedCss": [
     { "path": "styles/murder-mystery.css" }
   ],
-  "preloadedDependencies": [
-    { "machineName": "H5P.jQuery", "majorVersion": 1, "minorVersion": 10 }
-  ]
+  "preloadedDependencies": []
 }

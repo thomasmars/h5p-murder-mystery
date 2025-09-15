@@ -1,0 +1,21 @@
+{
+  "title": "Murder Mystery (Prototype)",
+  "description": "En minimal LLM-drevet samtalebasert mysterietype (prototype).",
+  "machineName": "H5P.MurderMysteryProto",
+  "majorVersion": 0,
+  "minorVersion": 1,
+  "patchVersion": 0,
+  "author": "Thomas",
+  "license": "MIT",
+  "runnable": 1,
+  "embedTypes": ["div"],
+  "preloadedJs": [
+    { "path": "scripts/murder-mystery.js" }
+  ],
+  "preloadedCss": [
+    { "path": "styles/murder-mystery.css" }
+  ],
+  "preloadedDependencies": [
+    { "machineName": "H5P.jQuery", "majorVersion": 1, "minorVersion": 10 }
+  ]
+}

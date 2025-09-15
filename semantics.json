@@ -1,0 +1,11 @@
+[
+  {
+    "label": "Intro",
+    "name": "intro",
+    "type": "group",
+    "fields": [
+      { "label": "Tittel", "name": "title", "type": "text" },
+      { "label": "Ingress", "name": "lead", "type": "text", "widget": "textarea" }
+    ]
+  }
+]

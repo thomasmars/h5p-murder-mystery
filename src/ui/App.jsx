@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import endingImage from '../assets/end.png';
 import { personas } from '../util/personas.js';
-import { chatWithOpenAI } from '../util/openai.js';
+import { chatWithOpenAI, synthesizeSpeech, openAIConfigured } from '../util/openai.js';
 
 function Message({ role, content }) {
   return (
@@ -22,12 +22,28 @@ export default function App({ requestResize = () => {} }) {
   const [wrongGuess, setWrongGuess] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(() => openAIConfigured);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const audioRef = useRef(null);
+
+  const voiceLookup = useMemo(() => personas.reduce((acc, persona) => {
+    if (persona.voice) acc[persona.id] = persona.voice;
+    return acc;
+  }, {}), []);
 
   const currentMessages = logs[active.id] || [{ role: 'system', content: active.system }];
   const visibleMessages = useMemo(
     () => currentMessages.filter(m => m.role !== 'system'),
     [currentMessages]
   );
+
+  useEffect(() => () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      URL.revokeObjectURL(audioRef.current.src);
+      audioRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (logRef.current) {
@@ -69,6 +85,7 @@ export default function App({ requestResize = () => {} }) {
         ...prev,
         [personaId]: [...(prev[personaId] || []), { role: 'assistant', content: reply }]
       }));
+      await speakReply(active.id, reply);
     } catch (e) {
       setLogs(prev => ({
         ...prev,
@@ -87,8 +104,52 @@ export default function App({ requestResize = () => {} }) {
       setCompleted(true);
       setWrongGuess(false);
       setGuess('');
+      stopAudio();
     } else {
       setWrongGuess(true);
+    }
+  }
+
+  async function speakReply(personaId, text) {
+    if (!audioEnabled || !openAIConfigured || completed || !text) return;
+    const voice = voiceLookup[personaId] || 'alloy';
+    try {
+      setAudioLoading(true);
+      const buffer = await synthesizeSpeech(text, { voice });
+      const blob = new Blob([buffer], { type: 'audio/mp3' });
+      const url = URL.createObjectURL(blob);
+      stopAudio();
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.play().catch(() => {});
+      audio.onended = audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+        }
+      };
+    } catch (err) {
+      console.error('[MM Proto] Unable to synthesize speech', err);
+    } finally {
+      setAudioLoading(false);
+    }
+  }
+
+  function toggleAudio() {
+    if (!openAIConfigured) return;
+    if (!audioEnabled) {
+      setAudioEnabled(true);
+    } else {
+      setAudioEnabled(false);
+      stopAudio();
+    }
+  }
+
+  function stopAudio() {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      URL.revokeObjectURL(audioRef.current.src);
+      audioRef.current = null;
     }
   }
 
@@ -110,6 +171,20 @@ export default function App({ requestResize = () => {} }) {
           </ul>
         </aside>
         <main className="h5p-mm__chat">
+          {openAIConfigured && (
+            <div className="h5p-mm__toolbar">
+              <button
+                type="button"
+                className={`h5p-mm__audio-toggle ${audioEnabled ? 'is-on' : ''}`}
+                onClick={toggleAudio}
+              >
+                {audioEnabled ? 'Audio replies on' : 'Audio replies off'}
+              </button>
+              {audioEnabled && audioLoading && (
+                <span className="h5p-mm__audio-status">Generating audio…</span>
+              )}
+            </div>
+          )}
           <div className="h5p-mm__log" ref={logRef}>
             {visibleMessages.map((m, i) => (
               <Message key={i} role={m.role} content={m.content} />

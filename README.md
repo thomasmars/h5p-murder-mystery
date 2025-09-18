@@ -9,7 +9,7 @@ Development
 LLM setup (prototype)
 - Uses the official `openai` npm package in-browser (prototype only) with the Responses API and `gpt-5`.
 - Put your key in `.env` as `OPENAI_API_KEY=...`, then run `npm run build` again so webpack injects it.
-- Verify: UI notice disappears and Detective Vale returns real replies.
+- Persona replies can play aloud by calling OpenAI's text-to-speech API from the browser; toggle audio in the chat toolbar.
 - If replies are stubbed, check console for CORS/CSP blocks to `api.openai.com`. Some H5P hosts disallow external `connect-src`.
 
 Notes

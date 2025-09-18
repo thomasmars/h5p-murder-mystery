@@ -15,13 +15,6 @@ window.H5P = window.H5P || {};
     container.classList.add('h5p-mm');
     container.innerHTML = '';
 
-    const header = document.createElement('div');
-    header.className = 'h5p-mm__header';
-    const title = (this.params.intro && this.params.intro.title) || 'Murder Mystery (Prototype)';
-    const lead = (this.params.intro && this.params.intro.lead) || 'Skriv inn innhold i editoren.';
-    header.innerHTML = `<h2>${title}</h2><p>${lead}</p>`;
-    container.appendChild(header);
-
     const mount = document.createElement('div');
     mount.className = 'h5p-mm__root';
     container.appendChild(mount);

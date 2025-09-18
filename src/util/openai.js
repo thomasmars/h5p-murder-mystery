@@ -4,7 +4,7 @@
 import OpenAI from 'openai';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const MODEL_ID = 'gpt-5';
+const MODEL_ID = 'gpt-4o-mini';
 const SPEECH_MODEL_ID = 'gpt-4o-mini-tts';
 
 const client = OPENAI_API_KEY
@@ -16,24 +16,31 @@ const client = OPENAI_API_KEY
 
 export const openAIConfigured = Boolean(OPENAI_API_KEY);
 
-function toInput(persona, messages) {
+function toInput(systemPrompt, messages) {
   return [
-    { role: 'system', content: persona.system },
+    { role: 'system', content: systemPrompt },
     ...messages
       .filter(m => m.role !== 'system')
       .map(m => ({ role: m.role, content: m.content }))
   ];
 }
 
-export async function chatWithOpenAI(persona, messages) {
+export async function chatWithOpenAI(persona, messages, { systemAugment = '' } = {}) {
+  const systemPrompt = systemAugment
+    ? `${persona.system}\n\n${systemAugment}`
+    : persona.system;
+
   if (!client) {
     const last = [...messages].reverse().find(m => m.role === 'user');
+    if (persona.id === 'lars') {
+      return `[stub] Lars replies (compliments ???): ${last ? last.content : '...'}`;
+    }
     return `[stub] ${persona.name} replies: ${last ? last.content : '...'}`;
   }
 
   const response = await client.responses.create({
     model: MODEL_ID,
-    input: toInput(persona, messages)
+    input: toInput(systemPrompt, messages)
   });
 
   return response.output_text || '[error] Empty response from model';

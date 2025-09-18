@@ -1,16 +1,102 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import endingImage from '../assets/end.png';
-import detectivePortrait from '../assets/personas/detective.png';
-import butlerPortrait from '../assets/personas/butler.png';
-import heirPortrait from '../assets/personas/heir.png';
+import hannePortrait from '../assets/personas/hanne.png';
+import larsPortrait from '../assets/personas/lars.png';
+import marisPortrait from '../assets/personas/maris.png';
+import frodePortrait from '../assets/personas/frode.png';
+import ryanPortrait from '../assets/personas/ryan.png';
 import { personas } from '../util/personas.js';
 import { chatWithOpenAI, synthesizeSpeech, openAIConfigured } from '../util/openai.js';
 
 const personaImages = {
-  detective: detectivePortrait,
-  butler: butlerPortrait,
-  heir: heirPortrait
+  hanne: hannePortrait,
+  lars: larsPortrait,
+  maris: marisPortrait,
+  frode: frodePortrait,
+  ryan: ryanPortrait
 };
+
+const complimentKeywords = [
+  'nice', 'kind', 'smart', 'brilliant', 'great', 'amazing', 'awesome', 'helpful', 'handsome',
+  'talented', 'cool', 'wonderful', 'fantastic', 'impressive', 'sweet', 'lovely', 'admirable',
+  'incredible', 'best', 'appreciate', 'love', 'admire'
+];
+const complimentRegex = new RegExp(`\\b(${complimentKeywords.join('|')})\\b`, 'i');
+const complimentSubjectRegex = /\b(you|you're|youre|ur|u|lars)\b/i;
+const thanksRegex = /\bthank(?:s| you| ya| u|you so much)\b/i;
+const repeatRegex = /\b(?:repeat|say that again|what did you say|come again|speak up|pardon|huh|could you(?: please)? (?:repeat|say that)|can you(?: please)? (?:repeat|say that)|please repeat|sorry[,\s]+(?:what|could you repeat))\b/i;
+const incidentKeywordRegex = /(?:incident|handle|door|nugatti|smear|smeared|smearing|sticky|goop|photo|picture|evidence|jar)/i;
+const incidentIntentRegex = /(?:who|what|tell|explain|why|how|when|did|happen|saw|see|show|describe|happened)/i;
+const hairKeywordRegex = /(?:hair|hairline|locks|ponytail|wig|toupee|scalp|bald)/i;
+
+function defaultPersonaBehavior() {
+  return {
+    compliments: 0
+  };
+}
+
+function initialPersonaBehaviors() {
+  return personas.reduce((acc, persona) => {
+    acc[persona.id] = defaultPersonaBehavior();
+    return acc;
+  }, {});
+}
+
+function countCompliments(text) {
+  if (!text) return 0;
+  const lower = text.toLowerCase();
+  if (!complimentSubjectRegex.test(lower)) return 0;
+  if (thanksRegex.test(lower)) return 1;
+  return complimentRegex.test(lower) ? 1 : 0;
+}
+
+function isRepeatRequest(text) {
+  if (!text) return false;
+  return repeatRegex.test(text.toLowerCase());
+}
+
+function isIncidentInquiry(text) {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  if (!incidentKeywordRegex.test(lower)) return false;
+  return incidentIntentRegex.test(lower) || lower.includes('?');
+}
+
+function buildLarsAugment({
+  compliments,
+  repeatRequested,
+  askedAboutIncident,
+  hairMention
+}) {
+  const complimentsNeeded = Math.max(0, 3 - compliments);
+  const complimentsSatisfied = compliments >= 3;
+
+  let complimentDirective;
+  if (complimentsSatisfied) {
+    complimentDirective = askedAboutIncident
+      ? 'The player has finally complimented you at least three separate times and is directly asking about the door-handle incident. Share the truth calmly in one sentence: confirm you saw Frode smearing Nugatti on the handle, mention how messy it looked, and note you snapped a photo.'
+      : 'You already feel appreciated. Unless they ask specifically about the incident, stay gentle and humble; do not volunteer accusations yet.';
+  } else {
+    complimentDirective = `You have only received ${compliments} compliment(s). You still need ${complimentsNeeded} more sincere compliment(s) before revealing what you saw. Never mention Frode, the Nugatti, or your photo yet—just hint that kindness helps you open up without quoting numbers.`;
+  }
+
+  const repeatDirective = repeatRequested
+    ? complimentsSatisfied
+      ? 'The player noticed you whispering. Repeat the thought clearly this time and include the detail you were hiding.'
+      : 'The player noticed you whispering. Repeat the thought clearly in one full sentence, but keep it vague and harmless—no accusations or new evidence.'
+    : '';
+
+  const hairDirective = hairMention
+    ? 'The player mentioned your hair. You are proudly, unmistakably bald. Correct them gently, refuse to count it as a compliment, and encourage them to praise something else about you instead.'
+    : 'Remember you are bald. Never pretend you have hair or accept hair-related compliments.';
+
+  return [
+    complimentDirective,
+    repeatDirective,
+    hairDirective,
+    'Work the phrase "kinda sorta" into your speech whenever you explain how you feel or what you noticed. Speak softly, stay a little shy, keep replies to a single sentence, and avoid stage directions or asterisks.'
+  ].join(' ');
+}
 
 function Message({ role, content }) {
   return (
@@ -25,6 +111,7 @@ export default function App({ requestResize = () => {}, params = {} }) {
     acc[persona.id] = [{ role: 'system', content: persona.system }];
     return acc;
   }, {}));
+  const [personaBehaviors, setPersonaBehaviors] = useState(initialPersonaBehaviors);
   const [input, setInput] = useState('');
   const [guess, setGuess] = useState('');
   const [wrongGuess, setWrongGuess] = useState(false);
@@ -105,22 +192,66 @@ export default function App({ requestResize = () => {}, params = {} }) {
     if (!text || busy) return;
     const personaId = active.id;
     const next = [...currentMessages, { role: 'user', content: text }];
+    let larsComplimentIncrement = 0;
+    let larsAugment = '';
+    let larsHairMention = false;
+    if (personaId === 'lars') {
+      const state = personaBehaviors[personaId] || defaultPersonaBehavior();
+      larsComplimentIncrement = countCompliments(text);
+      larsHairMention = hairKeywordRegex.test(text.toLowerCase());
+      if (larsHairMention) {
+        larsComplimentIncrement = 0;
+      }
+      const complimentsForPrompt = state.compliments + larsComplimentIncrement;
+      const askedRepeat = isRepeatRequest(text);
+      const askedAboutIncident = isIncidentInquiry(text);
+      larsAugment = buildLarsAugment({
+        compliments: complimentsForPrompt,
+        repeatRequested: askedRepeat,
+        askedAboutIncident,
+        hairMention: larsHairMention
+      });
+    }
     setLogs(prev => ({ ...prev, [personaId]: next }));
     setInput('');
     setBusy(true);
+    let larsReply = null;
     try {
-      const reply = await chatWithOpenAI(active, next);
+      const reply = await chatWithOpenAI(
+        active,
+        next,
+        personaId === 'lars' && larsAugment
+          ? { systemAugment: larsAugment }
+          : undefined
+      );
+      const processedReply = reply;
+      larsReply = processedReply;
       setLogs(prev => ({
         ...prev,
-        [personaId]: [...(prev[personaId] || []), { role: 'assistant', content: reply }]
+        [personaId]: [...(prev[personaId] || []), { role: 'assistant', content: processedReply }]
       }));
-      await speakReply(active.id, reply);
+      await speakReply(active.id, processedReply);
     } catch (e) {
       setLogs(prev => ({
         ...prev,
         [personaId]: [...(prev[personaId] || []), { role: 'assistant', content: '[error] Unable to get reply' }]
       }));
     } finally {
+      if (personaId === 'lars' && (larsComplimentIncrement || larsReply !== null)) {
+        setPersonaBehaviors(prev => {
+          const prevState = prev[personaId] || defaultPersonaBehavior();
+          const compliments = prevState.compliments + larsComplimentIncrement;
+          if (compliments === prevState.compliments) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [personaId]: {
+              compliments
+            }
+          };
+        });
+      }
       setBusy(false);
     }
   }
@@ -129,7 +260,7 @@ export default function App({ requestResize = () => {}, params = {} }) {
     if (completed) return;
     const g = guess.trim().toLowerCase();
     if (!g) return;
-    if (g === 'the butler did it') {
+    if (g.includes('frode')) {
       setCompleted(true);
       setWrongGuess(false);
       setGuess('');
@@ -142,10 +273,13 @@ export default function App({ requestResize = () => {}, params = {} }) {
 
   async function speakReply(personaId, text) {
     if (!audioEnabled || !openAIConfigured || completed || !text) return;
-    const voice = voiceLookup[personaId] || 'alloy';
+    const voiceSetting = voiceLookup[personaId];
+    const voice = typeof voiceSetting === 'string' ? voiceSetting : voiceSetting?.id || 'alloy';
+    const instructions = typeof voiceSetting === 'object' ? voiceSetting.instructions : '';
     try {
       setAudioLoading(true);
-      const buffer = await synthesizeSpeech(text, { voice });
+      const speechText = instructions ? `${instructions}\n\n${text}` : text;
+      const buffer = await synthesizeSpeech(speechText, { voice });
       const blob = new Blob([buffer], { type: 'audio/mp3' });
       const url = URL.createObjectURL(blob);
       stopAudio();
@@ -183,8 +317,8 @@ export default function App({ requestResize = () => {}, params = {} }) {
     }
   }
 
-  const introTitle = params?.intro?.title || 'Murder Mystery (Prototype)';
-  const introLead = params?.intro?.lead || 'Choose a suspect to begin your interrogation.';
+  const introTitle = params?.intro?.title || 'The Door Handle Disaster';
+  const introLead = params?.intro?.lead || 'Hanne is distraught after touching something sticky brown on the office door handle. Help her figure out which of your coworkers is responsible.';
 
   return (
     <>

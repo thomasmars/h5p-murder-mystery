@@ -4,41 +4,34 @@
 import OpenAI from 'openai';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_API_BASE = (process.env.OPENAI_API_BASE || 'https://api.openai.com').replace(/\/$/, '');
-const OPENAI_ORG = process.env.OPENAI_ORG || '';
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const MODEL_ID = 'gpt-5';
 
-export const openAIConfigured = Boolean(OPENAI_API_KEY);
-
-let client = null;
-if (OPENAI_API_KEY) {
-  client = new OpenAI({
+const client = OPENAI_API_KEY
+  ? new OpenAI({
     apiKey: OPENAI_API_KEY,
-    baseURL: OPENAI_API_BASE + '/v1',
-    organization: OPENAI_ORG || undefined,
     dangerouslyAllowBrowser: true
-  });
+  })
+  : null;
+
+function toInput(persona, messages) {
+  return [
+    { role: 'system', content: persona.system },
+    ...messages
+      .filter(m => m.role !== 'system')
+      .map(m => ({ role: m.role, content: m.content }))
+  ];
 }
 
 export async function chatWithOpenAI(persona, messages) {
   if (!client) {
     const last = [...messages].reverse().find(m => m.role === 'user');
-    console.warn('[MM Proto] OPENAI_API_KEY missing. Returning stub response.');
     return `[stub] ${persona.name} replies: ${last ? last.content : '...'}`;
   }
 
-  try {
-    const resp = await client.chat.completions.create({
-      model: MODEL,
-      temperature: 0.4,
-      messages: [
-        { role: 'system', content: persona.system },
-        ...messages.filter(m => m.role !== 'system')
-      ]
-    });
-    return resp.choices?.[0]?.message?.content || '';
-  } catch (err) {
-    console.error('[MM Proto] OpenAI request failed:', err);
-    throw err;
-  }
+  const response = await client.responses.create({
+    model: MODEL_ID,
+    input: toInput(persona, messages)
+  });
+
+  return response.output_text || '[error] Empty response from model';
 }

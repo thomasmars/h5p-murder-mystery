@@ -7,9 +7,8 @@ Development
 - Ensure `library.json` preloads `dist/murder-mystery.bundle.js` and `styles/murder-mystery.css`.
 
 LLM setup (prototype)
-- Uses the official `openai` npm package in-browser (prototype only).
+- Uses the official `openai` npm package in-browser (prototype only) with the Responses API and `gpt-5`.
 - Put your key in `.env` as `OPENAI_API_KEY=...`, then run `npm run build` again so webpack injects it.
-- Optional: `OPENAI_API_BASE` (default `https://api.openai.com`) and `OPENAI_ORG`.
 - Verify: UI notice disappears and Detective Vale returns real replies.
 - If replies are stubbed, check console for CORS/CSP blocks to `api.openai.com`. Some H5P hosts disallow external `connect-src`.
 

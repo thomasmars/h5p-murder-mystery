@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import endingWinImage from '../assets/end.png';
 import endingFailImage from '../assets/ending.png';
+import successImage from '../assets/success.png';
 import hannePortrait from '../assets/personas/hanne.png';
 import larsPortrait from '../assets/personas/lars.png';
 import marisPortrait from '../assets/personas/maris.png';
@@ -32,7 +32,8 @@ const hairKeywordRegex = /(?:hair|hairline|locks|ponytail|wig|toupee|scalp|bald)
 
 function defaultPersonaBehavior() {
   return {
-    compliments: 0
+    compliments: 0,
+    hintCooldown: 0
   };
 }
 
@@ -67,7 +68,8 @@ function buildLarsAugment({
   compliments,
   repeatRequested,
   askedAboutIncident,
-  hairMention
+  hairMention,
+  shouldPromptKindness
 }) {
   const complimentsNeeded = Math.max(0, 3 - compliments);
   const complimentsSatisfied = compliments >= 3;
@@ -81,6 +83,12 @@ function buildLarsAugment({
     complimentDirective = `You have only received ${compliments} compliment(s). You still need ${complimentsNeeded} more sincere compliment(s) before revealing what you saw. Never mention Frode, the Nugatti, or your photo yet—just hint that kindness helps you open up without quoting numbers.`;
   }
 
+  const kindnessDirective = !complimentsSatisfied
+    ? shouldPromptKindness
+      ? 'You can gently hint that more kind words help you share, but keep it brief—one soft reminder within the sentence.'
+      : 'Do not mention compliments or kindness right now; just answer politely while staying a little shy.'
+    : '';
+
   const repeatDirective = repeatRequested
     ? complimentsSatisfied
       ? 'The player noticed you whispering. Repeat the thought clearly this time and include the detail you were hiding.'
@@ -93,6 +101,7 @@ function buildLarsAugment({
 
   return [
     complimentDirective,
+    kindnessDirective,
     repeatDirective,
     hairDirective,
     'Work the phrase "kinda sorta" into your speech whenever you explain how you feel or what you noticed. Speak softly, stay a little shy, keep replies to a single sentence, and avoid stage directions or asterisks.'
@@ -195,6 +204,7 @@ export default function App({ requestResize = () => {}, params = {} }) {
     let larsComplimentIncrement = 0;
     let larsAugment = '';
     let larsHairMention = false;
+    let larsShouldPromptKindness = false;
     if (personaId === 'lars') {
       const state = personaBehaviors[personaId] || defaultPersonaBehavior();
       larsComplimentIncrement = countCompliments(text);
@@ -205,11 +215,13 @@ export default function App({ requestResize = () => {}, params = {} }) {
       const complimentsForPrompt = state.compliments + larsComplimentIncrement;
       const askedRepeat = isRepeatRequest(text);
       const askedAboutIncident = isIncidentInquiry(text);
+      larsShouldPromptKindness = !askedRepeat && complimentsForPrompt < 3 && state.hintCooldown <= 0;
       larsAugment = buildLarsAugment({
         compliments: complimentsForPrompt,
         repeatRequested: askedRepeat,
         askedAboutIncident,
-        hairMention: larsHairMention
+        hairMention: larsHairMention,
+        shouldPromptKindness: larsShouldPromptKindness
       });
     }
     setLogs(prev => ({ ...prev, [personaId]: next }));
@@ -237,17 +249,24 @@ export default function App({ requestResize = () => {}, params = {} }) {
         [personaId]: [...(prev[personaId] || []), { role: 'assistant', content: '[error] Unable to get reply' }]
       }));
     } finally {
-      if (personaId === 'lars' && (larsComplimentIncrement || larsReply !== null)) {
+      if (personaId === 'lars' && (larsComplimentIncrement || larsReply !== null || larsShouldPromptKindness)) {
         setPersonaBehaviors(prev => {
           const prevState = prev[personaId] || defaultPersonaBehavior();
           const compliments = prevState.compliments + larsComplimentIncrement;
-          if (compliments === prevState.compliments) {
+          let hintCooldown = prevState.hintCooldown;
+          if (larsShouldPromptKindness) {
+            hintCooldown = 2;
+          } else if (hintCooldown > 0) {
+            hintCooldown -= 1;
+          }
+          if (compliments === prevState.compliments && hintCooldown === prevState.hintCooldown) {
             return prev;
           }
           return {
             ...prev,
             [personaId]: {
-              compliments
+              compliments,
+              hintCooldown
             }
           };
         });
@@ -423,7 +442,7 @@ export default function App({ requestResize = () => {}, params = {} }) {
             <div className="h5p-mm__ending-panel">
               <div className="h5p-mm__ending-img-wrap">
                 <img
-                  src={completed ? endingWinImage : endingFailImage}
+                  src={completed ? successImage : endingFailImage}
                   alt={completed ? 'Case closed illustration' : 'Office in disarray'}
                   className="h5p-mm__ending-img"
                 />
@@ -432,8 +451,8 @@ export default function App({ requestResize = () => {}, params = {} }) {
               <>
                 <h3 className="h5p-mm__ending-title">Case Closed</h3>
                 <div className="h5p-mm__ending-text">
-                  <p>The butler’s alibi collapsed under the missing key, the altered heater timer, and the footprints with a tell-tale drag.</p>
-                  <p>With the truth out, the manor exhales and the greenhouse lamps dim.</p>
+                  <p>Frode’s Nugatti stunt doesn’t hold up once you present Lars’s photo and the compliments stop flowing.</p>
+                  <p>Hanne finally grips a clean handle, the office laughs in relief, and Frode gets stuck with cleanup duty.</p>
                 </div>
               </>
             ) : (
@@ -441,7 +460,7 @@ export default function App({ requestResize = () => {}, params = {} }) {
                 <h3 className="h5p-mm__ending-title">Case Left Sticky</h3>
                 <div className="h5p-mm__ending-text">
                   <p>You accused {lastGuess || 'the wrong suspect'}, and the real prankster keeps the door handle slimy.</p>
-                  <p>Hanne refuses to touch the entrance, the office smells like Nugatti, and morale quietly crumbles.</p>
+                  <p>Hanne still won’t touch the entrance, but put this case on the roadmap and you’ll crack the next one on your own.</p>
                 </div>
               </>
             )}

@@ -4,7 +4,7 @@
 import OpenAI from 'openai';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const MODEL_ID = 'gpt-4o-mini';
+const MODEL_ID = 'gpt-5';
 const SPEECH_MODEL_ID = 'gpt-4o-mini-tts';
 
 const client = OPENAI_API_KEY

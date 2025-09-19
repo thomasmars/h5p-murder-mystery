@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import endingImage from '../assets/end.png';
+import endingWinImage from '../assets/end.png';
+import endingFailImage from '../assets/ending.png';
 import hannePortrait from '../assets/personas/hanne.png';
 import larsPortrait from '../assets/personas/lars.png';
 import marisPortrait from '../assets/personas/maris.png';
@@ -114,8 +115,9 @@ export default function App({ requestResize = () => {}, params = {} }) {
   const [personaBehaviors, setPersonaBehaviors] = useState(initialPersonaBehaviors);
   const [input, setInput] = useState('');
   const [guess, setGuess] = useState('');
-  const [wrongGuess, setWrongGuess] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [lastGuess, setLastGuess] = useState('');
   const [busy, setBusy] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(() => openAIConfigured);
   const [audioLoading, setAudioLoading] = useState(false);
@@ -159,17 +161,16 @@ export default function App({ requestResize = () => {}, params = {} }) {
     return () => {
       clearTimeout(timeout);
     };
-  }, [active?.id, visibleMessages.length, wrongGuess, completed, requestResize]);
+  }, [active?.id, visibleMessages.length, completed, failed, requestResize]);
 
   function openPersona(persona) {
-    if (completed) return;
+    if (completed || failed) return;
     setLogs(prev => {
       if (prev[persona.id]) return prev;
       return { ...prev, [persona.id]: [{ role: 'system', content: persona.system }] };
     });
     stopAudio();
     setActive(persona);
-    setWrongGuess(false);
     setInput('');
     setGuess('');
     setBusy(false);
@@ -180,14 +181,13 @@ export default function App({ requestResize = () => {}, params = {} }) {
     stopAudio();
     setActive(null);
     setInput('');
-    setWrongGuess(false);
     setGuess('');
     setBusy(false);
     setTimeout(() => requestResize(), 0);
   }
 
   async function send() {
-    if (completed || !active) return;
+    if (completed || failed || !active) return;
     const text = input.trim();
     if (!text || busy) return;
     const personaId = active.id;
@@ -257,22 +257,30 @@ export default function App({ requestResize = () => {}, params = {} }) {
   }
 
   function submitGuess() {
-    if (completed) return;
-    const g = guess.trim().toLowerCase();
-    if (!g) return;
-    if (g.includes('frode')) {
+    if (completed || failed) return;
+    const trimmedGuess = guess.trim();
+    if (!trimmedGuess) return;
+    const normalized = trimmedGuess.toLowerCase();
+    if (normalized.includes('frode')) {
       setCompleted(true);
-      setWrongGuess(false);
+      setFailed(false);
       setGuess('');
+      setLastGuess(trimmedGuess);
       stopAudio();
     } else {
-      setWrongGuess(true);
+      setFailed(true);
+      setCompleted(false);
+      setLastGuess(trimmedGuess);
+      setActive(null);
+      setInput('');
+      setGuess('');
+      stopAudio();
     }
     setTimeout(() => requestResize(), 0);
   }
 
   async function speakReply(personaId, text) {
-    if (!audioEnabled || !openAIConfigured || completed || !text) return;
+    if (!audioEnabled || !openAIConfigured || completed || failed || !text) return;
     const voiceSetting = voiceLookup[personaId];
     const voice = typeof voiceSetting === 'string' ? voiceSetting : voiceSetting?.id || 'alloy';
     const instructions = typeof voiceSetting === 'object' ? voiceSetting.instructions : '';
@@ -392,35 +400,51 @@ export default function App({ requestResize = () => {}, params = {} }) {
               ))}
             </ul>
             <div className="h5p-mm__solve">
+              <label className="h5p-mm__solve-label" htmlFor="h5p-mm-solution-input">Who did it?</label>
               <input
                 className="h5p-mm__text"
                 type="text"
                 value={guess}
-                placeholder="Submit your solution phrase…"
-                disabled={completed}
+                placeholder="Name"
+                disabled={completed || failed}
+                id="h5p-mm-solution-input"
                 onChange={e => {
                   setGuess(e.target.value);
-                  if (wrongGuess) setWrongGuess(false);
                 }}
                 onKeyDown={e => e.key === 'Enter' && submitGuess()}
               />
-              <button className="h5p-mm__solve-btn" onClick={submitGuess} disabled={completed}>Submit</button>
+              <button className="h5p-mm__solve-btn" onClick={submitGuess} disabled={completed || failed}>Submit</button>
             </div>
-            {wrongGuess && !completed && <p className="h5p-mm__solution-wrong">Not quite — keep investigating.</p>}
           </div>
         )}
       </div>
-      {completed && (
+      {(completed || failed) && (
         <div className="h5p-mm__ending-full">
-          <div className="h5p-mm__ending-panel">
-            <div className="h5p-mm__ending-img-wrap">
-              <img src={endingImage} alt="Ashford Manor at night" className="h5p-mm__ending-img" />
-            </div>
-            <h3 className="h5p-mm__ending-title">Case Closed</h3>
-            <div className="h5p-mm__ending-text">
-              <p>The butler’s alibi collapsed under the missing key, the altered heater timer, and the footprints with a tell-tale drag.</p>
-              <p>With the truth out, the manor exhales and the greenhouse lamps dim.</p>
-            </div>
+            <div className="h5p-mm__ending-panel">
+              <div className="h5p-mm__ending-img-wrap">
+                <img
+                  src={completed ? endingWinImage : endingFailImage}
+                  alt={completed ? 'Case closed illustration' : 'Office in disarray'}
+                  className="h5p-mm__ending-img"
+                />
+              </div>
+            {completed ? (
+              <>
+                <h3 className="h5p-mm__ending-title">Case Closed</h3>
+                <div className="h5p-mm__ending-text">
+                  <p>The butler’s alibi collapsed under the missing key, the altered heater timer, and the footprints with a tell-tale drag.</p>
+                  <p>With the truth out, the manor exhales and the greenhouse lamps dim.</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="h5p-mm__ending-title">Case Left Sticky</h3>
+                <div className="h5p-mm__ending-text">
+                  <p>You accused {lastGuess || 'the wrong suspect'}, and the real prankster keeps the door handle slimy.</p>
+                  <p>Hanne refuses to touch the entrance, the office smells like Nugatti, and morale quietly crumbles.</p>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

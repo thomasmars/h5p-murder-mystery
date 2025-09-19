@@ -97,3 +97,73 @@ export const personas = [
     }
   }
 ];
+
+function slugify(value = '') {
+  return value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
+function normalizeVoice(voice = {}, fallback = {}) {
+  const id = typeof voice.id === 'string' && voice.id.trim()
+    ? voice.id.trim()
+    : fallback?.id;
+  const instructions = typeof voice.instructions === 'string' && voice.instructions.trim()
+    ? voice.instructions.trim()
+    : fallback?.instructions;
+
+  if (!id && !instructions) {
+    return undefined;
+  }
+
+  return instructions ? { id: id || 'alloy', instructions } : { id }; // allow id-only
+}
+
+export function buildPersonas(customPersonas = []) {
+  if (!Array.isArray(customPersonas) || customPersonas.length === 0) {
+    return personas;
+  }
+
+  const defaultMap = new Map(personas.map(persona => [persona.id, persona]));
+  const resolved = customPersonas
+    .map(raw => {
+      if (!raw) return null;
+      const base = raw.id ? defaultMap.get(raw.id) : undefined;
+      const idSource = (typeof raw.id === 'string' && raw.id.trim())
+        || slugify(raw.name)
+        || base?.id;
+      if (!idSource) return null;
+      const id = idSource;
+      const name = typeof raw.name === 'string' && raw.name.trim()
+        ? raw.name.trim()
+        : base?.name || id;
+      const role = typeof raw.role === 'string' && raw.role.trim()
+        ? raw.role.trim()
+        : base?.role || '';
+      const system = typeof raw.system === 'string' && raw.system.trim()
+        ? raw.system.trim()
+        : base?.system || '';
+      if (!system) return null;
+      const voice = normalizeVoice(raw.voice || {}, base?.voice);
+      const persona = {
+        id,
+        name,
+        role,
+        system
+      };
+      if (voice) {
+        persona.voice = voice;
+      }
+      if (raw.portrait) {
+        persona.portrait = raw.portrait;
+      }
+      return persona;
+    })
+    .filter(Boolean);
+
+  return resolved.length ? resolved : personas;
+}

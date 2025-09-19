@@ -24,6 +24,7 @@ window.H5P = window.H5P || {};
     root.render(
       <App
         params={this.params}
+        contentId={this.contentId}
         requestResize={() => window.H5P && window.H5P.trigger(instance, 'resize')}
       />
     );

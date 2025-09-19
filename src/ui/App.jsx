@@ -6,10 +6,10 @@ import larsPortrait from '../assets/personas/lars.png';
 import marisPortrait from '../assets/personas/maris.png';
 import frodePortrait from '../assets/personas/frode.png';
 import ryanPortrait from '../assets/personas/ryan.png';
-import { personas } from '../util/personas.js';
+import { buildPersonas } from '../util/personas.js';
 import { chatWithOpenAI, synthesizeSpeech, openAIConfigured } from '../util/openai.js';
 
-const personaImages = {
+const defaultPortraits = {
   hanne: hannePortrait,
   lars: larsPortrait,
   maris: marisPortrait,
@@ -37,11 +37,70 @@ function defaultPersonaBehavior() {
   };
 }
 
-function initialPersonaBehaviors() {
-  return personas.reduce((acc, persona) => {
+function createBehaviorMap(list) {
+  return list.reduce((acc, persona) => {
     acc[persona.id] = defaultPersonaBehavior();
     return acc;
   }, {});
+}
+
+function syncBehaviorMap(prev, list) {
+  const next = { ...prev };
+  const ids = new Set(list.map(p => p.id));
+  let changed = false;
+
+  Object.keys(next).forEach(id => {
+    if (!ids.has(id)) {
+      delete next[id];
+      changed = true;
+    }
+  });
+
+  list.forEach(persona => {
+    if (!next[persona.id]) {
+      next[persona.id] = defaultPersonaBehavior();
+      changed = true;
+    }
+  });
+
+  return changed ? next : prev;
+}
+
+function createInitialLogs(list) {
+  return list.reduce((acc, persona) => {
+    acc[persona.id] = [{ role: 'system', content: persona.system }];
+    return acc;
+  }, {});
+}
+
+function syncLogs(prev, list) {
+  const next = { ...prev };
+  const ids = new Set(list.map(p => p.id));
+  let changed = false;
+
+  Object.keys(next).forEach(id => {
+    if (!ids.has(id)) {
+      delete next[id];
+      changed = true;
+    }
+  });
+
+  list.forEach(persona => {
+    const existing = next[persona.id];
+    const systemMessage = { role: 'system', content: persona.system };
+    if (!existing) {
+      next[persona.id] = [systemMessage];
+      changed = true;
+      return;
+    }
+    if (!existing.length || existing[0].role !== 'system' || existing[0].content !== persona.system) {
+      const rest = existing.filter(msg => msg.role !== 'system');
+      next[persona.id] = [systemMessage, ...rest];
+      changed = true;
+    }
+  });
+
+  return changed ? next : prev;
 }
 
 function countCompliments(text) {
@@ -114,14 +173,15 @@ function Message({ role, content }) {
   );
 }
 
-export default function App({ requestResize = () => {}, params = {} }) {
+export default function App({ requestResize = () => {}, params = {}, contentId = null }) {
   const logRef = useRef(null);
+  const personaList = useMemo(
+    () => buildPersonas(params?.personas),
+    [params?.personas]
+  );
   const [active, setActive] = useState(null);
-  const [logs, setLogs] = useState(() => personas.reduce((acc, persona) => {
-    acc[persona.id] = [{ role: 'system', content: persona.system }];
-    return acc;
-  }, {}));
-  const [personaBehaviors, setPersonaBehaviors] = useState(initialPersonaBehaviors);
+  const [logs, setLogs] = useState(() => createInitialLogs(personaList));
+  const [personaBehaviors, setPersonaBehaviors] = useState(() => createBehaviorMap(personaList));
   const [input, setInput] = useState('');
   const [guess, setGuess] = useState('');
   const [completed, setCompleted] = useState(false);
@@ -131,11 +191,42 @@ export default function App({ requestResize = () => {}, params = {} }) {
   const [audioEnabled, setAudioEnabled] = useState(() => openAIConfigured);
   const [audioLoading, setAudioLoading] = useState(false);
   const audioRef = useRef(null);
+  const solutionPhrase = useMemo(() => {
+    const raw = typeof params?.case?.solutionPhrase === 'string' ? params.case.solutionPhrase.trim() : '';
+    return raw ? raw.toLowerCase() : 'frode did it';
+  }, [params?.case?.solutionPhrase]);
+  const solutionChecks = useMemo(() => {
+    if (!solutionPhrase) return [];
+    const tokens = solutionPhrase.split(/\s+/).filter(Boolean);
+    const set = new Set([solutionPhrase, ...tokens]);
+    return Array.from(set);
+  }, [solutionPhrase]);
 
-  const voiceLookup = useMemo(() => personas.reduce((acc, persona) => {
+  useEffect(() => {
+    setPersonaBehaviors(prev => syncBehaviorMap(prev, personaList));
+    setLogs(prev => syncLogs(prev, personaList));
+  }, [personaList]);
+
+  const voiceLookup = useMemo(() => personaList.reduce((acc, persona) => {
     if (persona.voice) acc[persona.id] = persona.voice;
     return acc;
-  }, {}), []);
+  }, {}), [personaList]);
+
+  const personaImages = useMemo(() => {
+    const map = {};
+    personaList.forEach(persona => {
+      if (persona.portrait && persona.portrait.path) {
+        if (typeof H5P !== 'undefined' && typeof H5P.getPath === 'function' && contentId !== null && contentId !== undefined) {
+          map[persona.id] = H5P.getPath(persona.portrait.path, contentId);
+        } else if (/^https?:/i.test(persona.portrait.path)) {
+          map[persona.id] = persona.portrait.path;
+        }
+      } else if (defaultPortraits[persona.id]) {
+        map[persona.id] = defaultPortraits[persona.id];
+      }
+    });
+    return map;
+  }, [personaList, contentId]);
 
   const currentMessages = active && logs[active.id]
     ? logs[active.id]
@@ -171,6 +262,16 @@ export default function App({ requestResize = () => {}, params = {} }) {
       clearTimeout(timeout);
     };
   }, [active?.id, visibleMessages.length, completed, failed, requestResize]);
+
+  useEffect(() => {
+    if (!active) return;
+    const updated = personaList.find(p => p.id === active.id);
+    if (!updated) {
+      setActive(null);
+    } else if (updated !== active) {
+      setActive(updated);
+    }
+  }, [personaList, active]);
 
   function openPersona(persona) {
     if (completed || failed) return;
@@ -280,7 +381,8 @@ export default function App({ requestResize = () => {}, params = {} }) {
     const trimmedGuess = guess.trim();
     if (!trimmedGuess) return;
     const normalized = trimmedGuess.toLowerCase();
-    if (normalized.includes('frode')) {
+    const isCorrect = solutionChecks.some(check => normalized.includes(check));
+    if (isCorrect) {
       setCompleted(true);
       setFailed(false);
       setGuess('');
@@ -407,7 +509,7 @@ export default function App({ requestResize = () => {}, params = {} }) {
             <h3 className="h5p-mm__select-title">Choose someone to question</h3>
             <p className="h5p-mm__select-subtitle">Select a persona to continue your investigation.</p>
             <ul className="h5p-mm__select-list">
-              {personas.map(p => (
+              {personaList.map(p => (
                 <li key={p.id}>
                   <button type="button" className="h5p-mm__select-card" onClick={() => openPersona(p)}>
                     {personaImages[p.id] && (
